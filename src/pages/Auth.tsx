@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { z } from "zod";
 import { useAuth } from "@/hooks/useAuth";
+import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,15 +11,21 @@ import { toast } from "@/hooks/use-toast";
 import { Loader2, ArrowLeft } from "lucide-react";
 
 const loginSchema = z.object({
-  email: z.string().email("Geçerli bir email adresi giriniz"),
+  identifier: z.string().min(3, "En az 3 karakter giriniz"),
   password: z.string().min(6, "Şifre en az 6 karakter olmalıdır"),
 });
 
-const signupSchema = loginSchema.extend({
+const signupSchema = z.object({
+  email: z.string().email("Geçerli bir email adresi giriniz"),
   username: z.string()
     .min(3, "Kullanıcı adı en az 3 karakter olmalıdır")
     .max(20, "Kullanıcı adı en fazla 20 karakter olabilir")
     .regex(/^[a-zA-Z0-9_-]+$/, "Sadece harf, rakam, alt çizgi ve tire kullanılabilir"),
+  minecraft_username: z.string()
+    .min(3, "Minecraft kullanıcı adı en az 3 karakter olmalıdır")
+    .max(16, "Minecraft kullanıcı adı en fazla 16 karakter olabilir")
+    .regex(/^[a-zA-Z0-9_]+$/, "Sadece harf, rakam ve alt çizgi kullanılabilir"),
+  password: z.string().min(6, "Şifre en az 6 karakter olmalıdır"),
   confirmPassword: z.string(),
 }).refine((data) => data.password === data.confirmPassword, {
   message: "Şifreler eşleşmiyor",
@@ -27,54 +34,76 @@ const signupSchema = loginSchema.extend({
 
 const Auth = () => {
   const [isLogin, setIsLogin] = useState(true);
+  const [identifier, setIdentifier] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [username, setUsername] = useState("");
+  const [minecraftUsername, setMinecraftUsername] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const { signIn, signUp, user } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (user) {
-      navigate("/");
-    }
+    if (user) navigate("/");
   }, [user, navigate]);
+
+  const getAuthErrorMessage = (error: { message?: string }, context: 'login' | 'signup'): string => {
+    const message = error.message || '';
+    if (message.includes('Invalid login credentials')) return 'Email/kullanıcı adı veya şifre hatalı';
+    if (message.includes('Email not confirmed')) return 'Lütfen emailinizi onaylayın';
+    if (message.includes('already registered')) return 'Bu email adresi zaten kayıtlı';
+    if (message.includes('Password should be at least')) return 'Şifre en az 6 karakter olmalıdır';
+    if (message.includes('Invalid email')) return 'Geçersiz email adresi';
+    if (message.includes('User not found')) return 'Email/kullanıcı adı veya şifre hatalı';
+    if (message.includes('Minecraft username')) return 'Minecraft kullanıcı adı 3-16 karakter, sadece harf/rakam/_ olmalıdır';
+    if (message.includes('duplicate key') && message.includes('minecraft_username')) return 'Bu Minecraft kullanıcı adı zaten kullanılıyor';
+    return context === 'login' ? 'Email/kullanıcı adı veya şifre hatalı' : 'Kayıt işlemi başarısız oldu. Lütfen tekrar deneyin.';
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
 
-    // Helper function to get safe error message
-    const getAuthErrorMessage = (error: { message?: string }, context: 'login' | 'signup'): string => {
-      const message = error.message || '';
-      
-      // Map known error messages to safe, localized versions
-      if (message.includes('Invalid login credentials')) return 'Email veya şifre hatalı';
-      if (message.includes('Email not confirmed')) return 'Lütfen emailinizi onaylayın';
-      if (message.includes('already registered')) return 'Bu email adresi zaten kayıtlı';
-      if (message.includes('Password should be at least')) return 'Şifre en az 6 karakter olmalıdır';
-      if (message.includes('Invalid email')) return 'Geçersiz email adresi';
-      if (message.includes('User not found')) return 'Email veya şifre hatalı';
-      if (message.includes('Username must be')) return 'Kullanıcı adı 3-20 karakter olmalıdır';
-      if (message.includes('Username can only contain')) return 'Kullanıcı adı sadece harf, rakam, _ ve - içerebilir';
-      
-      // Generic fallback - never expose raw error messages
-      return context === 'login' 
-        ? 'Email veya şifre hatalı' 
-        : 'Kayıt işlemi başarısız oldu. Lütfen tekrar deneyin.';
-    };
-
     try {
       if (isLogin) {
-        const validation = loginSchema.safeParse({ email, password });
+        const validation = loginSchema.safeParse({ identifier, password });
         if (!validation.success) {
           toast({ title: "Hata", description: validation.error.errors[0].message, variant: "destructive" });
           setIsLoading(false);
           return;
         }
 
-        const { error } = await signIn(email, password);
+        let loginEmail = identifier;
+
+        // If identifier is not an email, look up the email from minecraft_username
+        if (!identifier.includes("@")) {
+          const { data: profile } = await supabase
+            .from("profiles")
+            .select("user_id")
+            .eq("minecraft_username", identifier)
+            .maybeSingle();
+
+          if (!profile) {
+            toast({ title: "Giriş Hatası", description: "Oyuncu bulunamadı", variant: "destructive" });
+            setIsLoading(false);
+            return;
+          }
+
+          // Get the user's email via edge function
+          const { data: userData } = await supabase.functions.invoke("get-user-email", {
+            body: { user_id: profile.user_id },
+          });
+
+          if (!userData?.email) {
+            toast({ title: "Giriş Hatası", description: "Kullanıcı bilgisi alınamadı", variant: "destructive" });
+            setIsLoading(false);
+            return;
+          }
+          loginEmail = userData.email;
+        }
+
+        const { error } = await signIn(loginEmail, password);
         if (error) {
           toast({ title: "Giriş Hatası", description: getAuthErrorMessage(error, 'login'), variant: "destructive" });
         } else {
@@ -82,22 +111,34 @@ const Auth = () => {
           navigate("/");
         }
       } else {
-        const validation = signupSchema.safeParse({ email, password, confirmPassword, username });
+        const validation = signupSchema.safeParse({ email, password, confirmPassword, username, minecraft_username: minecraftUsername });
         if (!validation.success) {
           toast({ title: "Hata", description: validation.error.errors[0].message, variant: "destructive" });
           setIsLoading(false);
           return;
         }
 
-        const { error } = await signUp(email, password, username);
+        // Check minecraft_username uniqueness
+        const { data: existing } = await supabase
+          .from("profiles")
+          .select("id")
+          .eq("minecraft_username", minecraftUsername)
+          .maybeSingle();
+
+        if (existing) {
+          toast({ title: "Hata", description: "Bu Minecraft kullanıcı adı zaten kullanılıyor", variant: "destructive" });
+          setIsLoading(false);
+          return;
+        }
+
+        const { error } = await signUp(email, password, username, minecraftUsername);
         if (error) {
           toast({ title: "Kayıt Hatası", description: getAuthErrorMessage(error, 'signup'), variant: "destructive" });
         } else {
-          toast({ title: "Kayıt Başarılı!", description: "Hesabınız oluşturuldu. Hoş geldiniz!" });
-          navigate("/");
+          toast({ title: "Kayıt Başarılı!", description: "Hesabınız oluşturuldu. Email onayı gerekebilir." });
         }
       }
-    } catch (error) {
+    } catch {
       toast({ title: "Hata", description: "Bir hata oluştu. Lütfen tekrar deneyin.", variant: "destructive" });
     }
 
@@ -121,28 +162,41 @@ const Auth = () => {
         
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
-            {!isLogin && (
-              <div className="space-y-2">
-                <Label htmlFor="username">Kullanıcı Adı</Label>
-                <Input id="username" type="text" placeholder="xPro_Gamer47" value={username} onChange={(e) => setUsername(e.target.value)} className="bg-secondary/50 border-border/30" />
-              </div>
-            )}
-            
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input id="email" type="email" placeholder="ornek@email.com" value={email} onChange={(e) => setEmail(e.target.value)} className="bg-secondary/50 border-border/30" />
-            </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="password">Şifre</Label>
-              <Input id="password" type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} className="bg-secondary/50 border-border/30" />
-            </div>
-            
-            {!isLogin && (
-              <div className="space-y-2">
-                <Label htmlFor="confirmPassword">Şifre Tekrar</Label>
-                <Input id="confirmPassword" type="password" placeholder="••••••••" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="bg-secondary/50 border-border/30" />
-              </div>
+            {isLogin ? (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="identifier">Minecraft Kullanıcı Adı veya Email</Label>
+                  <Input id="identifier" type="text" placeholder="username veya ornek@email.com" value={identifier} onChange={(e) => setIdentifier(e.target.value)} className="bg-secondary/50 border-border/30" />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="password">Şifre</Label>
+                  <Input id="password" type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} className="bg-secondary/50 border-border/30" />
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="minecraft_username">Minecraft Kullanıcı Adı</Label>
+                  <Input id="minecraft_username" type="text" placeholder="Steve_123" value={minecraftUsername} onChange={(e) => setMinecraftUsername(e.target.value)} className="bg-secondary/50 border-border/30" maxLength={16} />
+                  <p className="text-xs text-muted-foreground">⚠️ Kayıt sonrası değiştirilemez!</p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="username">Görünen Ad</Label>
+                  <Input id="username" type="text" placeholder="xPro_Gamer47" value={username} onChange={(e) => setUsername(e.target.value)} className="bg-secondary/50 border-border/30" />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="email">Email</Label>
+                  <Input id="email" type="email" placeholder="ornek@email.com" value={email} onChange={(e) => setEmail(e.target.value)} className="bg-secondary/50 border-border/30" />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="password">Şifre</Label>
+                  <Input id="password" type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} className="bg-secondary/50 border-border/30" />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="confirmPassword">Şifre Tekrar</Label>
+                  <Input id="confirmPassword" type="password" placeholder="••••••••" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="bg-secondary/50 border-border/30" />
+                </div>
+              </>
             )}
             
             <Button type="submit" className="w-full" disabled={isLoading}>

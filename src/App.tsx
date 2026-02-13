@@ -11,6 +11,7 @@ import DuelHistory from "./pages/DuelHistory";
 import Players from "./pages/Players";
 import Leaderboard from "./pages/Leaderboard";
 import NotFound from "./pages/NotFound";
+import CoinAdmin from "./pages/CoinAdmin";
 
 const queryClient = new QueryClient();
 
@@ -29,6 +30,7 @@ const App = () => (
             <Route path="/leaderboard" element={<Leaderboard />} />
             <Route path="/auth" element={<Auth />} />
             <Route path="/profile" element={<Profile />} />
+            <Route path="/coin-admin" element={<CoinAdmin />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>

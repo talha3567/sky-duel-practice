@@ -14,6 +14,33 @@ export type Database = {
   }
   public: {
     Tables: {
+      coin_transactions: {
+        Row: {
+          action: string
+          admin_username: string
+          amount: number
+          created_at: string
+          id: string
+          target_username: string
+        }
+        Insert: {
+          action: string
+          admin_username: string
+          amount: number
+          created_at?: string
+          id?: string
+          target_username: string
+        }
+        Update: {
+          action?: string
+          admin_username?: string
+          amount?: number
+          created_at?: string
+          id?: string
+          target_username?: string
+        }
+        Relationships: []
+      }
       duels: {
         Row: {
           arena: string | null
@@ -92,6 +119,30 @@ export type Database = {
           updated_at?: string
           win_streak?: number
           wins?: number
+        }
+        Relationships: []
+      }
+      players: {
+        Row: {
+          coins: number
+          created_at: string
+          id: number
+          is_op: boolean
+          username: string
+        }
+        Insert: {
+          coins?: number
+          created_at?: string
+          id?: number
+          is_op?: boolean
+          username: string
+        }
+        Update: {
+          coins?: number
+          created_at?: string
+          id?: number
+          is_op?: boolean
+          username?: string
         }
         Relationships: []
       }

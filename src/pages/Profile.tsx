@@ -14,6 +14,7 @@ interface Profile {
   id: string;
   user_id: string;
   username: string | null;
+  minecraft_username: string | null;
   avatar_url: string | null;
   total_kills: number;
   total_deaths: number;
@@ -21,6 +22,7 @@ interface Profile {
   total_duels: number;
   win_streak: number;
   best_win_streak: number;
+  banned: boolean;
 }
 
 interface PlayerStats {
@@ -234,7 +236,14 @@ const Profile = () => {
               </div>
               <div className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="username">Kullanıcı Adı</Label>
+                  <Label>Minecraft Kullanıcı Adı</Label>
+                  <p className="text-foreground text-sm px-3 py-2 bg-secondary/30 rounded-lg font-mono">
+                    {profile?.minecraft_username || "Belirlenmemiş"}
+                    <span className="text-xs text-muted-foreground ml-2">🔒 Değiştirilemez</span>
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="username">Görünen Ad</Label>
                   <div className="flex gap-2">
                     <Input id="username" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Kullanıcı adınız" className="bg-secondary/50 border-border/30" />
                     <Button onClick={handleSaveUsername} disabled={saving || username === profile?.username} size="sm">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Kaydet"}</Button>

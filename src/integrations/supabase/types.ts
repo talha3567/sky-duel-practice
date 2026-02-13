@@ -149,9 +149,11 @@ export type Database = {
       profiles: {
         Row: {
           avatar_url: string | null
+          banned: boolean
           best_win_streak: number
           created_at: string
           id: string
+          minecraft_username: string | null
           total_deaths: number
           total_duels: number
           total_kills: number
@@ -163,9 +165,11 @@ export type Database = {
         }
         Insert: {
           avatar_url?: string | null
+          banned?: boolean
           best_win_streak?: number
           created_at?: string
           id?: string
+          minecraft_username?: string | null
           total_deaths?: number
           total_duels?: number
           total_kills?: number
@@ -177,9 +181,11 @@ export type Database = {
         }
         Update: {
           avatar_url?: string | null
+          banned?: boolean
           best_win_streak?: number
           created_at?: string
           id?: string
+          minecraft_username?: string | null
           total_deaths?: number
           total_duels?: number
           total_kills?: number

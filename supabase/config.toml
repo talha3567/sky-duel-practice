@@ -1,1 +1,4 @@
 project_id = "gvxqiqvqcypwvshevtec"
+
+[functions.coin-admin]
+verify_jwt = false

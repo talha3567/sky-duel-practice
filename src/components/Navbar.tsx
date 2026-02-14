@@ -49,8 +49,8 @@ export const Navbar = () => {
   const navLinks = [
     { to: "/", label: "Anasayfa" },
     { to: "/leaderboard", label: "Liderlik" },
-    { to: "/op-panel", label: "OP Panel" },
-    { to: "/coin-admin", label: "Coin Admin" },
+    ...(user ? [{ to: "/op-panel", label: "OP Panel" }] : []),
+    ...(user ? [{ to: "/coin-admin", label: "Coin Admin" }] : []),
   ];
 
   return (

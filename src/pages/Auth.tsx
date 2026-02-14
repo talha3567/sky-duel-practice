@@ -1,217 +1,152 @@
 import { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import { z } from "zod";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 import { toast } from "@/hooks/use-toast";
-import { Loader2, ArrowLeft } from "lucide-react";
-
-const loginSchema = z.object({
-  identifier: z.string().min(3, "En az 3 karakter giriniz"),
-  password: z.string().min(6, "Şifre en az 6 karakter olmalıdır"),
-});
-
-const signupSchema = z.object({
-  email: z.string().email("Geçerli bir email adresi giriniz"),
-  username: z.string()
-    .min(3, "Kullanıcı adı en az 3 karakter olmalıdır")
-    .max(20, "Kullanıcı adı en fazla 20 karakter olabilir")
-    .regex(/^[a-zA-Z0-9_-]+$/, "Sadece harf, rakam, alt çizgi ve tire kullanılabilir"),
-  minecraft_username: z.string()
-    .min(3, "Minecraft kullanıcı adı en az 3 karakter olmalıdır")
-    .max(16, "Minecraft kullanıcı adı en fazla 16 karakter olabilir")
-    .regex(/^[a-zA-Z0-9_]+$/, "Sadece harf, rakam ve alt çizgi kullanılabilir"),
-  password: z.string().min(6, "Şifre en az 6 karakter olmalıdır"),
-  confirmPassword: z.string(),
-}).refine((data) => data.password === data.confirmPassword, {
-  message: "Şifreler eşleşmiyor",
-  path: ["confirmPassword"],
-});
+import { Loader2, ArrowLeft, Gamepad2 } from "lucide-react";
 
 const Auth = () => {
-  const [isLogin, setIsLogin] = useState(true);
-  const [identifier, setIdentifier] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [username, setUsername] = useState("");
-  const [minecraftUsername, setMinecraftUsername] = useState("");
+  const [code, setCode] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const { signIn, signUp, user } = useAuth();
+  const { user } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
     if (user) navigate("/");
   }, [user, navigate]);
 
-  const getAuthErrorMessage = (error: { message?: string }, context: 'login' | 'signup'): string => {
-    const message = error.message || '';
-    if (message.includes('Invalid login credentials')) return 'Email/kullanıcı adı veya şifre hatalı';
-    if (message.includes('Email not confirmed')) return 'Lütfen emailinizi onaylayın';
-    if (message.includes('already registered')) return 'Bu email adresi zaten kayıtlı';
-    if (message.includes('Password should be at least')) return 'Şifre en az 6 karakter olmalıdır';
-    if (message.includes('Invalid email')) return 'Geçersiz email adresi';
-    if (message.includes('User not found')) return 'Email/kullanıcı adı veya şifre hatalı';
-    if (message.includes('Minecraft username')) return 'Minecraft kullanıcı adı 3-16 karakter, sadece harf/rakam/_ olmalıdır';
-    if (message.includes('duplicate key') && message.includes('minecraft_username')) return 'Bu Minecraft kullanıcı adı zaten kullanılıyor';
-    return context === 'login' ? 'Email/kullanıcı adı veya şifre hatalı' : 'Kayıt işlemi başarısız oldu. Lütfen tekrar deneyin.';
-  };
+  const handleVerify = async () => {
+    if (code.length !== 6) {
+      toast({ title: "Hata", description: "6 haneli kodu eksiksiz giriniz", variant: "destructive" });
+      return;
+    }
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
     setIsLoading(true);
-
     try {
-      if (isLogin) {
-        const validation = loginSchema.safeParse({ identifier, password });
-        if (!validation.success) {
-          toast({ title: "Hata", description: validation.error.errors[0].message, variant: "destructive" });
-          setIsLoading(false);
-          return;
-        }
+      const { data, error: fnError } = await supabase.functions.invoke("verify-code", {
+        body: { code },
+      });
 
-        let loginEmail = identifier;
+      if (fnError || !data?.success) {
+        toast({
+          title: "Doğrulama Hatası",
+          description: data?.error || "Geçersiz veya süresi dolmuş kod",
+          variant: "destructive",
+        });
+        setCode("");
+        setIsLoading(false);
+        return;
+      }
 
-        // If identifier is not an email, look up the email from minecraft_username
-        if (!identifier.includes("@")) {
-          const { data: profile } = await supabase
-            .from("profiles")
-            .select("user_id")
-            .eq("minecraft_username", identifier)
-            .maybeSingle();
+      // Use the token_hash to sign in via OTP verification
+      const { error: otpError } = await supabase.auth.verifyOtp({
+        token_hash: data.token_hash,
+        type: "magiclink",
+      });
 
-          if (!profile) {
-            toast({ title: "Giriş Hatası", description: "Oyuncu bulunamadı", variant: "destructive" });
-            setIsLoading(false);
-            return;
-          }
-
-          // Get the user's email via edge function
-          const { data: userData } = await supabase.functions.invoke("get-user-email", {
-            body: { user_id: profile.user_id },
-          });
-
-          if (!userData?.email) {
-            toast({ title: "Giriş Hatası", description: "Kullanıcı bilgisi alınamadı", variant: "destructive" });
-            setIsLoading(false);
-            return;
-          }
-          loginEmail = userData.email;
-        }
-
-        const { error } = await signIn(loginEmail, password);
-        if (error) {
-          toast({ title: "Giriş Hatası", description: getAuthErrorMessage(error, 'login'), variant: "destructive" });
-        } else {
-          toast({ title: "Hoş geldiniz!", description: "Başarıyla giriş yaptınız." });
-          navigate("/");
-        }
+      if (otpError) {
+        toast({
+          title: "Giriş Hatası",
+          description: "Oturum açılamadı. Lütfen tekrar deneyin.",
+          variant: "destructive",
+        });
+        setCode("");
       } else {
-        const validation = signupSchema.safeParse({ email, password, confirmPassword, username, minecraft_username: minecraftUsername });
-        if (!validation.success) {
-          toast({ title: "Hata", description: validation.error.errors[0].message, variant: "destructive" });
-          setIsLoading(false);
-          return;
-        }
-
-        // Check minecraft_username uniqueness
-        const { data: existing } = await supabase
-          .from("profiles")
-          .select("id")
-          .eq("minecraft_username", minecraftUsername)
-          .maybeSingle();
-
-        if (existing) {
-          toast({ title: "Hata", description: "Bu Minecraft kullanıcı adı zaten kullanılıyor", variant: "destructive" });
-          setIsLoading(false);
-          return;
-        }
-
-        const { error } = await signUp(email, password, username, minecraftUsername);
-        if (error) {
-          toast({ title: "Kayıt Hatası", description: getAuthErrorMessage(error, 'signup'), variant: "destructive" });
-        } else {
-          toast({ title: "Kayıt Başarılı!", description: "Hesabınız oluşturuldu. Email onayı gerekebilir." });
-        }
+        toast({
+          title: "Hoş geldiniz!",
+          description: `${data.minecraft_username} olarak giriş yaptınız.`,
+        });
+        navigate("/");
       }
     } catch {
-      toast({ title: "Hata", description: "Bir hata oluştu. Lütfen tekrar deneyin.", variant: "destructive" });
+      toast({
+        title: "Hata",
+        description: "Bir hata oluştu. Lütfen tekrar deneyin.",
+        variant: "destructive",
+      });
+      setCode("");
     }
 
     setIsLoading(false);
   };
 
+  // Auto-submit when 6 digits entered
+  useEffect(() => {
+    if (code.length === 6 && !isLoading) {
+      handleVerify();
+    }
+  }, [code]);
+
   return (
     <div className="min-h-screen bg-background text-foreground flex items-center justify-center px-4">
-      <Link to="/" className="absolute top-6 left-6 flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors">
+      <Link
+        to="/"
+        className="absolute top-6 left-6 flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors"
+      >
         <ArrowLeft className="w-5 h-5" />
         <span>Geri Dön</span>
       </Link>
-      
+
       <Card className="w-full max-w-md glass-card border-border/20">
         <CardHeader className="text-center">
+          <div className="mx-auto mb-4 w-16 h-16 rounded-2xl bg-green-500/10 flex items-center justify-center">
+            <Gamepad2 className="w-8 h-8 text-green-500" />
+          </div>
           <CardTitle className="text-3xl font-bold">SMPPRAC</CardTitle>
           <CardDescription className="text-muted-foreground">
-            {isLogin ? "Hesabınıza giriş yapın" : "Yeni hesap oluşturun"}
+            Minecraft hesabınızla giriş yapın
           </CardDescription>
         </CardHeader>
-        
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {isLogin ? (
+
+        <CardContent className="space-y-6">
+          <div className="bg-secondary/30 rounded-lg p-4 text-sm text-muted-foreground space-y-2">
+            <p className="font-medium text-foreground">Nasıl giriş yapılır?</p>
+            <ol className="list-decimal list-inside space-y-1">
+              <li>Minecraft sunucusuna bağlanın</li>
+              <li>
+                Oyun içinde <code className="bg-secondary px-1.5 py-0.5 rounded text-green-500 font-mono">/doğrula</code> yazın
+              </li>
+              <li>Chatinizde beliren <span className="text-green-500 font-bold">6 haneli kodu</span> aşağıya girin</li>
+              <li>Kodun süresi <span className="text-yellow-500 font-medium">5 dakikadır</span></li>
+            </ol>
+          </div>
+
+          <div className="flex flex-col items-center gap-4">
+            <p className="text-sm font-medium text-foreground">Doğrulama Kodunu Girin</p>
+            <InputOTP
+              maxLength={6}
+              value={code}
+              onChange={setCode}
+              disabled={isLoading}
+            >
+              <InputOTPGroup>
+                <InputOTPSlot index={0} />
+                <InputOTPSlot index={1} />
+                <InputOTPSlot index={2} />
+                <InputOTPSlot index={3} />
+                <InputOTPSlot index={4} />
+                <InputOTPSlot index={5} />
+              </InputOTPGroup>
+            </InputOTP>
+          </div>
+
+          <Button
+            onClick={handleVerify}
+            className="w-full"
+            disabled={isLoading || code.length !== 6}
+          >
+            {isLoading ? (
               <>
-                <div className="space-y-2">
-                  <Label htmlFor="identifier">Minecraft Kullanıcı Adı veya Email</Label>
-                  <Input id="identifier" type="text" placeholder="username veya ornek@email.com" value={identifier} onChange={(e) => setIdentifier(e.target.value)} className="bg-secondary/50 border-border/30" />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="password">Şifre</Label>
-                  <Input id="password" type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} className="bg-secondary/50 border-border/30" />
-                </div>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Doğrulanıyor...
               </>
             ) : (
-              <>
-                <div className="space-y-2">
-                  <Label htmlFor="minecraft_username">Minecraft Kullanıcı Adı</Label>
-                  <Input id="minecraft_username" type="text" placeholder="Steve_123" value={minecraftUsername} onChange={(e) => setMinecraftUsername(e.target.value)} className="bg-secondary/50 border-border/30" maxLength={16} />
-                  <p className="text-xs text-muted-foreground">⚠️ Kayıt sonrası değiştirilemez!</p>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="username">Görünen Ad</Label>
-                  <Input id="username" type="text" placeholder="xPro_Gamer47" value={username} onChange={(e) => setUsername(e.target.value)} className="bg-secondary/50 border-border/30" />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="email">Email</Label>
-                  <Input id="email" type="email" placeholder="ornek@email.com" value={email} onChange={(e) => setEmail(e.target.value)} className="bg-secondary/50 border-border/30" />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="password">Şifre</Label>
-                  <Input id="password" type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} className="bg-secondary/50 border-border/30" />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="confirmPassword">Şifre Tekrar</Label>
-                  <Input id="confirmPassword" type="password" placeholder="••••••••" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="bg-secondary/50 border-border/30" />
-                </div>
-              </>
+              "Giriş Yap"
             )}
-            
-            <Button type="submit" className="w-full" disabled={isLoading}>
-              {isLoading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Lütfen bekleyin...</> : (isLogin ? "Giriş Yap" : "Kayıt Ol")}
-            </Button>
-          </form>
-          
-          <div className="mt-6 text-center">
-            <p className="text-muted-foreground text-sm">
-              {isLogin ? "Hesabınız yok mu?" : "Zaten hesabınız var mı?"}
-              <button onClick={() => setIsLogin(!isLogin)} className="ml-2 text-foreground hover:underline font-medium">
-                {isLogin ? "Kayıt Ol" : "Giriş Yap"}
-              </button>
-            </p>
-          </div>
+          </Button>
         </CardContent>
       </Card>
     </div>

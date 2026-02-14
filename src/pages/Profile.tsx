@@ -190,7 +190,12 @@ const Profile = () => {
     setSaving(false);
   };
 
-  const handleSignOut = async () => { await signOut(); navigate("/"); };
+  const handleSignOut = async () => {
+    const confirmed = window.confirm("Çıkış yapmak istediğinize emin misiniz? Tekrar giriş yapmak için Minecraft sunucusunda /doğrula komutunu kullanmanız gerekecek.");
+    if (!confirmed) return;
+    await signOut();
+    navigate("/");
+  };
 
   // Use player_stats if available, otherwise fall back to profile stats
   const stats = {
